@@ -1,3 +1,21 @@
+# What is this?
+
+It's a MarkLogic based project that demonstrates RDF triple materializing.
+
+# What??
+
+Oh, just forget it and [do something more useful wth your life](http://lifehacker.com/how-sex-and-masturbation-affects-your-workouts-1788422698).
+
+The library /src/lib/fwq.xqy library written in XQuery is an example approach of materializing RDF triples from existing graph and using given rules. 
+
+# OK, how do I run/see some results?
+
+Read on.
+
+## Configure local.properties
+## Bootstrap MarkLogic database and deploy modules
+## Go to MarkLogic Query Console and load the workspace in ws/
+
 # Roxy
 
 ## Table of Contents
