@@ -15,10 +15,13 @@ Read on.
 Makes sure the configuration in deploy/local.properties reflects your setup:
 
 [server-version] should match the version of MarkLogic you use (8 or 9)
+
 [app-port] - make sure you use a port that is not yet used on your MarkLogic server
+
 [local-server] - localhost or a name/address of your virtual image where MarkLogic is running
 
 [user] - don't use "admin"
+
 [admin] - don't use "admin"
  
 ## Bootstrap MarkLogic database and deploy modules
@@ -36,5 +39,5 @@ This will deploy the fwc.xqy library found in src/lib to the modules database so
 
 ## Go to MarkLogic Query Console and load the workspace in content/ws/Triples Materialization Exercize.xml
 
-Read the comments within each of the queries in the provided workspace and go step by step through them. 
+Read the comments within each of the queries in the provided workspace and execute then in order as they are defined in the workspace.
 If there was no error, you should be to run the SPARQL queries i.e. they should all return results.
