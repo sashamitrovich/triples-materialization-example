@@ -1,0 +1,272 @@
+<export><workspace name="Triples Materialization Exercize"><query name="Ingest Roberts ontologz" focus="false" listorder="2" taborder="1" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="xquery">(: This code will ingest the ontology contained in the roberts-RL-family-full-V.owl file :)
+(: Make sure you specified the correct path :)
+
+xquery version "1.0-ml";
+declare namespace html = "http://www.w3.org/1999/xhtml";
+import module namespace sem = "http://marklogic.com/semantics" at "/MarkLogic/semantics.xqy";
+
+(:
+sem:rdf-load(
+   "/opt/MarkLogic/upload/roberts-RL-family-full-V.owl", "rdfxml"
+)
+:)
+
+sem:rdf-load('/vagrant/mat-triples/roberts-RL-family-full-V.owl', "graph=http://roberts-family-full")</query><query name="Count Triples" focus="false" listorder="3" taborder="2" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="javascript">// Use this (server-side javascript) to get the number of triples directly from the triple index
+
+fn.count(cts.triples());</query><query name="Construct propertyChainAxiom" focus="false" listorder="4" taborder="3" active="true" database="1808434849186732117" server="3012266241376237418" database-name="Schemas" server-name="App-Services" mode="xquery">(: Run this Xquery  against the Schema database to create the properyChainAxiom rules:)
+(: MarkLogic doesn't include this rules so you're defining them yourself here :)
+
+xquery version "1.0-ml";
+let $my-rules := text {"
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+prefix rdfs:    &lt;http://www.w3.org/2000/01/rdf-schema#&gt;
+prefix owl:     &lt;http://www.w3.org/2002/07/owl#&gt;
+
+rule 'three level propertyChainAxiom' construct {
+    ?w ?prop ?z
+} {
+    $prop owl:propertyChainAxiom ?l.
+    ?l  rdf:first ?f;
+        rdf:rest  ?r.
+    ?r  rdf:first ?f2;
+        rdf:rest  ?r2.
+    ?r2 rdf:first ?f3;
+        rdf:rest  rdf:nil.
+    ?w ?f ?x.
+    ?x ?f2 ?y.
+    ?y ?f3 ?z.
+}
+
+rule 'two level propertyChainAxiom' construct {
+    ?x ?prop ?z
+} {
+    $prop owl:propertyChainAxiom ?l.
+    ?l rdf:first ?f;
+       rdf:rest  ?r.
+    ?r rdf:first ?f2;
+       rdf:rest  rdf:nil.
+    ?x ?f ?y.
+    ?y ?f2 ?z.
+}
+
+"}
+return xdmp:document-insert ('/propertyChainAxiom.rules', $my-rules)</query><query name="Remove graphs (clean)" focus="false" listorder="1" taborder="4" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="javascript">// this js code removes 2 graphs (the default and the inferred one) - effectively cleans your DB
+
+var sem = require("/MarkLogic/semantics.xqy");
+declareUpdate();
+xdmp.collectionDelete("http://roberts-family-full")
+xdmp.collectionDelete("http://roberts-family-inferred")</query><query name="Ingest inferred triples" focus="false" listorder="5" taborder="5" active="true" database="13699679755264268658" server="3012266241376237418" database-name="Documents" server-name="App-Services" mode="xquery">(: This code will construct and persist new triples from the  &lt;http://roberts-family-full&gt; graph :)
+(: using rules defined in $rules :)
+
+
+xquery version "1.0-ml";
+import module namespace sem = "http://marklogic.com/semantics" at "/MarkLogic/semantics.xqy";
+
+
+declare function local:create-graph-overrid-param($graphuri) 
+{
+  fn:concat("override-graph=", $graphuri)
+};
+
+declare function local:insert-inferred-Triples($triples, $graphuri)
+{
+  let $graphparam := local:create-graph-overrid-param($graphuri) 
+
+  for $binding in $triples 
+    return xdmp:spawn-function(function() { 
+      sem:rdf-insert( 
+      sem:triple(map:get ($binding, 's'), map:get ($binding, 'p'), map:get ($binding, 'o')), 
+      $graphparam , (), ("Inferred") 
+    )
+  }, 
+  &lt;options xmlns="xdmp:eval"&gt;
+    &lt;transaction-mode&gt;update-auto-commit&lt;/transaction-mode&gt;
+  &lt;/options&gt;)
+};
+
+declare function local:sliceSequence($seq, $amount) 
+{
+  let $sizeofSeq := fn:count($seq)
+  let $remainder := math:fmod($sizeofSeq, $amount)
+  let $slices := xs:integer($sizeofSeq div $amount)
+ 
+  let $data := for $i in (0 to $slices)
+    let $_ := xdmp:set($i, $i * $amount)
+    let $slice := fn:subsequence($seq, $i+1, $amount)
+  return &lt;slice&gt;{$slice}&lt;/slice&gt;
+  
+  let $info :=  &lt;info&gt;
+                  &lt;slices&gt;{$slices}&lt;/slices&gt;
+                  &lt;remainder&gt;{$remainder}&lt;/remainder&gt;
+                &lt;/info&gt;
+  
+  return &lt;res&gt;
+          {$info}
+          &lt;data&gt;{$data}&lt;/data&gt;
+         &lt;/res&gt;
+};
+
+declare function local:spawnInsertTriples($data, $graphuri) 
+{
+  let $graphparam := local:create-graph-overrid-param($graphuri) 
+ 
+   return xdmp:spawn-function(function() { 
+      sem:rdf-insert( 
+               $data, 
+               $graphparam, (), ("Inferred") 
+               ), xdmp:commit()
+            }, 
+              &lt;options xmlns="xdmp:eval"&gt;
+                &lt;transaction-mode&gt;update-auto-commit&lt;/transaction-mode&gt;
+              &lt;/options&gt;)
+};
+
+
+declare function local:spawnsliceSequence($seq, $amount, $graphuri) 
+{
+  xdmp:spawn-function(function() { 
+      let $data := local:sliceSequence($seq, $amount) 
+      let $json := fn:exists($data//slice/json:object)
+
+      for $map in $data//slice
+        let $bindings := if ( $json ) then map:map($map/json:object) else map:map($map/map:map)
+        let $triples := for $binding in $bindings 
+          return sem:triple(map:get ($binding, 's'), map:get ($binding, 'p'), map:get ($binding, 'o'))
+      return local:spawnInsertTriples($triples, $graphuri)
+    }, 
+    &lt;options xmlns="xdmp:eval"&gt;
+      &lt;transaction-mode&gt;update-auto-commit&lt;/transaction-mode&gt;
+    &lt;/options&gt;)
+
+  
+  (:
+    local:spawnInsertTriples($triples)
+    return sem:triple(map:get ($binding, 's'), map:get ($binding, 'p'), map:get ($binding, 'o'))
+       let $data := xdmp:spawn-function(function() {
+    local:sliceSequence($seq, $amount)
+  })
+  :)
+};
+
+declare function local:genTriples($itemcount)
+{
+  for $i in (1 to $itemcount)
+
+  return map:new((
+    map:entry("s", fn:concat("http://temp.org/", fn:format-number($i, "000"))),
+    map:entry("p", fn:concat("http://temp.org/predicate/", fn:format-number($i, "000"))),
+    map:entry("o", fn:concat("_item", fn:format-number($i, "000")))
+  ))
+};
+
+declare option xdmp:transaction-mode "update";
+
+let $rules := (
+    "domain.rules", "range.rules", "subPropertyOf.rules", "subClassOf.rules", "inverseOf.rules",
+    "intersectionOf.rules", "someValuesFrom.rules", "hasValue.rules",
+    "onProperty.rules", 'equivalentClass.rules', 'equivalentProperty.rules',
+    "/propertyChainAxiom.rules"
+)  
+let $rdfs-store := sem:ruleset-store ($rules, sem:store(), ('size=300'))
+let $triples :=
+sem:sparql('
+  PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+  PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+  select ?s ?p ?o
+  FROM &lt;http://roberts-family-full&gt;
+  WHERE
+  { ?s ?p ?o }
+  ', (), (), $rdfs-store)
+
+  let $_ := xdmp:set-transaction-mode("update")
+     
+  return local:spawnsliceSequence($triples, 300, "http://roberts-family-inferred") 
+  
+ (:
+   return  local:spawnsliceSequence($triples[1 to 100], 10) 
+   return local:sliceSequence($triples[1 to 25], 5) 
+   return local:insert-inferred-Triples($triples)
+   
+     let $triples := local:genTriples(4) 
+
+ :)
+</query><query name="Ingest using library" focus="false" listorder="6" taborder="6" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="xquery">(: This code will construct and persist new triples from the  &lt;http://roberts-family-full&gt; graph :)
+(: using rules defined in $rules :)
+(: The whole code is stored in the /lib/fwc.xqy library so make sure it's deployed/copied to your Modules database :)
+(: It executes in the background, it will return empry result-set immediatelly but don't panick :)
+(: the number of triples will grow in the inferred graph and the background job is done withing next 10 seconds :)
+
+xquery version "1.0-ml";
+import module namespace fwc = "http://www.marklogic.com/custom/fwc" at "/lib/fwc.xqy";
+import module namespace sem = "http://marklogic.com/semantics" at "/MarkLogic/semantics.xqy";
+
+let $rules := (
+    "domain.rules", "range.rules", "subPropertyOf.rules", "subClassOf.rules", "inverseOf.rules",
+    "intersectionOf.rules", "someValuesFrom.rules", "hasValue.rules",
+    "onProperty.rules", 'equivalentClass.rules', 'equivalentProperty.rules',
+    "/propertyChainAxiom.rules"
+)
+
+let $rdfs-store := sem:ruleset-store ($rules, sem:store(), ('size=300'))
+let $sparql := fwc:get-defaultSparql("http://roberts-family-full")
+  
+let $target-graphuri := "http://roberts-family-inferred"
+let $slice-size := 300
+
+
+return fwc:spawn-infer-Triples($rules, $sparql, $rdfs-store, $target-graphuri, $slice-size)
+  
+(:
+  return fn:count(fwc:get-inferred-Triples($rules, $sparql, $rdfs-store))
+  return fwc:infer-Triples($rules, $sparql, $rdfs-store, $target-graphuri, $slice-size)
+  return fwc:spawn-infer-Triples($rules, $sparql, $rdfs-store, $target-graphuri, $slice-size)
+:)</query><query name="Q: UncleOfRobert" focus="false" listorder="7" taborder="7" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT DISTINCT ?X
+WHERE
+{ ?X rdf:type a1:UncleOfRobert }</query><query name="Q: NamedIndividual" focus="false" listorder="8" taborder="8" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+PREFIX owl: &lt;http://www.w3.org/2002/07/owl#&gt;
+SELECT  *
+FROM &lt;http://roberts-family-full&gt;
+WHERE
+{ ?X rdf:type+ owl:NamedIndividual }</query><query name="Q: SecondCousin" focus="false" listorder="9" taborder="9" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT ?X
+WHERE
+{ ?X rdf:type a1:SecondCousin }</query><query name="Q: SecondCousinOfRobert" focus="false" listorder="10" taborder="10" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">##[Query SecondCousinOfRobert (concept)]
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT DISTINCT ?X
+WHERE
+{ ?X rdf:type a1:SecondCousinOfRobert }</query><query name="Q: GreatGreatGrandparentOfRobert" focus="false" listorder="11" taborder="11" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">##^[Query GreatGreatGrandparentOfRobert]
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT DISTINCT ?X
+WHERE
+{ ?X rdf:type a1:GreatGreatGrandparentOfRobert }</query><query name="Q: hasFatherInLaw" focus="false" listorder="12" taborder="12" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">## query
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT DISTINCT ?X ?Y
+WHERE
+{ ?X a1:hasFatherInLaw ?Y }</query><query name="Q: grandParentOf" focus="false" listorder="13" taborder="13" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">## query
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT DISTINCT ?X ?Y
+WHERE
+{ ?X a1:grandParentOf ?Y }</query><query name="Q: complex1" focus="false" listorder="14" taborder="14" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT DISTINCT ?X ?Y
+WHERE
+{ ?X a1:isThirdCousinOf ?Y .
+  ?X a1:hasParent ?Z .
+  ?Z rdf:type a1:GreatUncle }</query><query name="Q: complex2" focus="true" listorder="15" taborder="15" active="true" database="15747975171013642047" server="6537816370912668398" database-name="mat-triples-content" server-name="mat-triples" mode="sparql">## query
+##^[Query firstCousin ancestor Husband]
+PREFIX rdf: &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt;
+PREFIX a1: &lt;http://www.co-ode.org/roberts/family-tree.owl#&gt;
+SELECT DISTINCT ?Y
+WHERE
+{ ?X rdf:type a1:FirstCousinOfRobert .
+  ?X a1:hasAncestor ?Y .
+  ?Y rdf:type a1:Husband }</query></workspace></export>
