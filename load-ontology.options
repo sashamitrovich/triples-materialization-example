@@ -1,0 +1,10 @@
+import
+
+-input_file_path 
+"content/roberts-RL-family-full-V.owl"
+
+-input_file_type 
+RDF
+
+-output_uri_prefix  
+"/triplestore/" 
