@@ -5,7 +5,7 @@ In this example we use a Roberts family ontology that contains a bit more than 3
 
 This is a proof of concept that shows how MarkLogic can be used in environments where it's necessary to run complex queries using complex rule-sets against complex ontologies.
 
-The original code has been written by [Mario Briana](https://de.linkedin.com/in/mario-briana-5881292)
+The original code has been written by [Mario Briana](https://de.linkedin.com/in/mario-briana-5881292).
 
 # What is this, again??
 
